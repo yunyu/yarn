@@ -10,7 +10,7 @@ import map from '../../util/map.js';
 
 const leven = require('leven');
 const path = require('path');
-const {quoteForShell, sh, unquoted} = require('puka');
+const {quoteForShell, quoteForSh, sh, unquoted} = require('puka');
 
 export function setFlags(commander: Object) {
   commander.description('Runs a defined package script.');
@@ -26,6 +26,8 @@ export async function run(config: Config, reporter: Reporter, flags: Object, arg
   const scripts = map();
   const binCommands = [];
   const visitedBinFolders = new Set();
+  const customShell = config.getOption('script-shell');
+  const isWin32 = process.platform === 'win32';
   let pkgCommands = [];
   for (const registry of Object.keys(registries)) {
     const binFolder = path.join(config.cwd, config.registries[registry].folder, '.bin');
@@ -33,7 +35,13 @@ export async function run(config: Config, reporter: Reporter, flags: Object, arg
       if (await fs.exists(binFolder)) {
         for (const name of await fs.readdir(binFolder)) {
           binCommands.push(name);
-          scripts[name] = quoteForShell(path.join(binFolder, name));
+          const cmdPath = path.join(binFolder, name);
+          // assume sh-compatible shell on Windows if customShell is set
+          if (customShell && isWin32) {
+            scripts[name] = quoteForSh(cmdPath.replace(/\\/g, '/'));
+          } else {
+            scripts[name] = quoteForShell(cmdPath);
+          }
         }
       }
       visitedBinFolders.add(binFolder);
@@ -81,7 +89,6 @@ export async function run(config: Config, reporter: Reporter, flags: Object, arg
       for (const [stage, cmd] of cmds) {
         // only tack on trailing arguments for default script, ignore for pre and post - #1595
         const cmdWithArgs = stage === action ? sh`${unquoted(cmd)} ${args}` : cmd;
-        const customShell = config.getOption('script-shell');
         if (customShell) {
           await execCommand(stage, config, cmdWithArgs, config.cwd, String(customShell));
         } else {
